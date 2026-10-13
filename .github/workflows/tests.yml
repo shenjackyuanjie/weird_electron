@@ -1,0 +1,51 @@
+name: Power engine tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: windows-latest
+            python: "3.13"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pip install --no-deps -e .
+      - name: Require real numerical dependencies
+        run: python -c "import pandapower, scipy; print('pandapower', pandapower.__version__, 'scipy', scipy.__version__)"
+      - run: ruff check .
+      - run: python -m pytest --cov=power_engine --cov=simulator --cov-report=term-missing --cov-report=xml --junitxml=outputs/junit.xml
+      - name: Three standard closed loops
+        run: |
+          python -m simulator demo --scenario A --output outputs/demo-A
+          python -m simulator demo --scenario B --output outputs/demo-B
+          python -m simulator demo --scenario C --output outputs/demo-C
+      - name: Paired-seed experiment
+        if: matrix.os == 'ubuntu-latest'
+        run: python -m simulator batch --cases 40 --steps 4 --output outputs/batch
+      - name: Record resolved environment
+        if: always()
+        run: python -m pip freeze > requirements-resolved.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: power-tests-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            outputs/
+            coverage.xml
+            requirements-resolved.txt

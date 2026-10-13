@@ -1,0 +1,35 @@
+{
+  "battery": {
+    "capacity_kwh": 500.0,
+    "soc_min": 0.1,
+    "soc_max": 0.9,
+    "initial_soc": 0.6,
+    "charge_efficiency": 0.95,
+    "discharge_efficiency": 0.95,
+    "charge_max_kw": 150.0,
+    "discharge_max_kw": 200.0
+  },
+  "network": {
+    "nominal_kv": 0.4,
+    "length_km": 0.08,
+    "r_ohm_per_km": 0.125,
+    "x_ohm_per_km": 0.08,
+    "max_current_ka": 0.6,
+    "load_power_factor": 0.98,
+    "voltage_min_pu": 0.95,
+    "voltage_max_pu": 1.05,
+    "loading_max_percent": 100.0
+  },
+  "step_seconds": 5.0,
+  "pv_available_kw": 350.0,
+  "load_critical_kw": 200.0,
+  "load_normal_kw": 300.0,
+  "grid_import_max_kw": 100.0,
+  "grid_export_max_kw": 0.0,
+  "grid_voltage_pu": 1.0,
+  "nominal_frequency_hz": 50.0,
+  "import_cost_per_kwh": 0.18,
+  "curtail_cost_per_kwh": 1.0,
+  "shed_cost_per_kwh": 1000.0,
+  "battery_cost_per_kwh": 0.22
+}
