@@ -1,34 +1,72 @@
-# 接手与下一阶段清单
+# A/B/C 集成交接与阶段验收
 
-## B 线先做
+[文档首页](README.md) · [数据协议](contracts.md) · [API](api.md) · [运行](getting-started.md)
 
-1. 审核 docs/model.md 的演示参数，用真实/经批准参数替换，保存 MicrogridConfig JSON；修改后重跑三类 Demo 和测试。
-2. 与 A/C 冻结 docs/contracts.md v0.1，统一 request_id、设备 ID、状态读取位置、单区间命令时长及错误码。
-3. 在完整依赖环境跑 pytest、三类 Demo、40 seed 实验。先看失败案例，不以成功比例替代安全审查。
+## 已交付的 B 线能力
 
-## 与 A 线对接
+Simulator、SOC、A/B/C场景、run_power_flow、optimize_dispatch、validate_plan、固定规则baseline、本地控制闭环、JSON适配器、执行回执与审计、配对实验、测试和文档已具备本地入口。
 
-将 api.invoke 或三个独立算法函数包装进真正 MCP 服务。工具权限分离；优化器无执行权限；执行入口必须再次绑定最新状态和相同 plan 内容，不能只信字符串 plan_id 或外部 pass=true。现有哈希不是认证，公开服务须另做权限。
+MCP Server、IoTDA遥测/命令、FunctionGraph、GeminiDB、AgentArts、统一HTTP后端和Dashboard **尚未实现**。仓库对应目录是预留，不是可启动的服务。B提供内部函数，不把pandapowerNet暴露给其他线。
 
-control_step 是本地编排样例，不是 AgentArts Workflow。Phase 2 默认最多重规划一次；计划 Phase 5 的最多两次由 A 的工作流显式设置。增加 Single-Agent/Multi-Agent 适配时，使用相同 seed 和时间区间，不把 deterministic optimizer 改名冒充 Agent。
+原计划§8.2把算法归B，§8.1另有“调用A提供的确定性工具”的文字歧义。按当前实现，算法由B维护；MCP服务封装、部署及认证的主责需队长明确，不默认已经分配完毕。
 
-## 与 C 线对接
+## 交接边界
 
-Simulator 的 get_state 输出只含 JSON；apply_action 返回 accepted；step 后返回 applied 和真实变化的 SOC/功率。C 负责 IoTDA 遥测与命令映射、MQTT 重连/超时/串行化、时间序列存储、事件触发和 Backend。
+| 对接方 | 使用本仓库什么 | 仍需对方/集成负责人完成什么 |
+|---|---|---|
+| A：AgentArts与MCP | JSON Schema、三类只计算工具、结构化错误/拒绝原因、场景与baseline运行器 | 专业Agent、Coordinator、Workflow、MCP传输、调用超时/权限、Trace、Single/Multi-Agent策略适配 |
+| C：云与产品 | Simulator状态出口、可信命令入口、accepted/applied/cancelled回执、模拟时钟和指标语义 | IoTDA产品/命令映射、遥测上传、时序存储、事件检测、HTTP后端、Dashboard、ECS进程管理 |
+| 队长/集成 | 协议草案、默认参数、已知限制、可复现测试 | 冻结单位/字段/设备身份、参数与SOP、职责、风险分级、最终指标和发布版本 |
 
-Simulator 目前是快速离散实验器：没有后台 sleep 循环，没有云端线程。持续设备进程必须由调度器按 5 秒节拍运行并定义无新命令时的安全策略；不能把实验器的停表行为直接当真实设备保护逻辑。
+不要让A/C手动从显示数据猜调度功率，也不要在前端接收到accepted时就改图表示设备已执行。
 
-## 尚待完成
+## 建议的只读/计算/执行划分
 
-ECS/容器联调、完整依赖锁定、真实 MCP/IoTDA、频率/孤岛模型（只在明确扩展范围后做）、持久化和跨进程并发控制、实际云端延迟指标、三种 Agent/规则统一对照、真实设备参数审查。
+| 未来能力名 | 当前可复用实现 | 约束 |
+|---|---|---|
+| get_microgrid_state | `sim.get_state().wire()` | 服务端可信实例提供，不让调用方替换实际状态 |
+| run_power_flow | `invoke("run_power_flow", payload, config)` | 只试算；收敛不等于安全 |
+| optimize_dispatch | `invoke("optimize_dispatch", payload, config)` | 只提案；无解必须结构化保留 |
+| validate_plan | `invoke("validate_plan", payload, config)` | 独立拒绝权；不能把外层ok当作pass |
+| execute_action | 后续可信执行服务包装 `sim.apply_action(plan)` 和 `sim.step()` | 目前无远端工具；必须认证、授权、复验最新状态、绑定plan_id |
+| 查询/取消 | `get_receipt`、`cancel_pending_action` | 单实例内存作用域；取消后新命令用新ID |
 
+forecast_pv、forecast_load、diagnose_alarm尚无对应预测/诊断实现，不应把预设曲线或告警字段包装成已验证模型。
 
-## 第二轮审查后对接注意
+## 先做本地无云合同测试
 
-实例级线程锁已实现，但不能跨 worker/进程保证命令幂等；多个 Backend worker 不应各自维护独立的同名设备仿真器。`control_step` 是多个公开调用组成的本地编排，不是分布式事务。
+A/C先按README运行Demo，再分别读取state、通过JSON工具提出和验证候选、在可信入口提交、推进并查询实际回执。完整可运行链见[manual_dispatch示例](../examples/manual_dispatch.py)。
 
-ACK 与 applied 都带实际复验的 `validation`；后端应保留该证据。取消旧 pending 用 `cancel_pending_action()`，查看历史状态用 `get_receipt(plan_id)`，不要用反复重发来查询。
+对接最少验证：结构化非法输入；关键负荷削减被拒；旧state方案被拒；同ID同内容重投不重复执行；同ID不同内容拒绝；事故取消pending；配置变更阻止旧批准执行；失败后保留证据与null指标。不要仅测试一个正常请求。
 
-JSON 时长不再接受字符串/布尔值，request_id/plan_id 不再接受任意对象转换。验证和潮流请求省略顶层 request_id 会继承 plan.request_id，显式冲突则拒绝；请同步共享 Schema。
+step使用模拟时间，没有真实五秒定时线程。C接入实时设备模拟时，需要自己调度轮次，并定义采样、过期和失败处理，不能认为构造Simulator会自动开始遥测。
 
-实验的 `failure_kind` 区分不可行、安全拒绝、运行故障和执行审计失败。`batch` 非零退出码不能直接忽略；无云集成时仍不能把本地耗时宣称为端到端云延迟。
+## 遥测与命令映射要冻结的内容
+
+所有功率kW、SOC0–1、时间带时区；设备id与microgrid_id、run_id/state_revision/request_id/plan_id之间的映射由集成定义。B现有state不是完整IoTDA TelemetryEvent；GridEvent和AgentFinding也尚未定义成最终共同协议。
+
+远端可能出现消息重复、乱序、部分设备执行和ACK丢失。当前本地操作是单实例中的整体状态更新，并未模拟ESS执行成功但负荷命令失败等部分执行。必须另定超时、重试、回执幂等、部分失败处置和重启恢复策略。
+
+不能只传入外部ValidationResult.pass=true就执行。当前apply_action会自行复验真实state/config；后续设备服务同样必须掌握可信约束，并且不向普通Agent开放设备写权限。hash只能绑定内容，不是授权凭据。
+
+## ECS 部署前的边界
+
+目前可在ECS像普通Linux机器一样安装并运行本地CLI，用完整测试验证环境；这不代表已经存在HTTP监听端口。仓库没有systemd单元、Dockerfile或可执行MCP服务器，不应编造启动命令。
+
+开发验证建议先保留一个可信Simulator实例、单进程执行所有写操作。实例锁不保护多worker或多容器共享的设备；扩容前设计持久化/跨进程串行与命令账本。receipt只在内存中，reset或进程重启会丢失。
+
+部署方还需服务账号与最小权限、配置来源、凭据管理、HTTPS、日志轮转、资源限制、告警和备份。密钥不入库；不是给本地适配器加一个公开URL就完成生产部署。
+
+## 尚待确认的模型与产品工作
+
+默认设备容量、效率、功率、电压限值、馈线和目标权重均是演示假设。批量随机配置用于软件验证，不是实际校园/工业微电网的建模结果。
+
+B场景当前为限PCC仍并网，完全断网/孤岛、构网型储能、频率动态、真实保护和复合事故仍缺模型。原计划恢复时延与MCP/Agent指标需要云端真实时间戳与调用链；本地perf_counter不能替代。
+
+最终阶段需把Single-Agent/Multi-Agent接入同一场景、配置和执行门，对比相同seed，保留失败案例与真实Trace。固定规则和LP对照已有结果，不能把它们改名当三套Agent实验。
+
+## 接入验收清单
+
+先冻结共同Schema与参数，再以本地示例跑通读状态→提案→验证→执行→新状态。其次接设备上报和真实命令回执，证明accepted与applied不同。然后接MCP权限与Agent工作流，证明拒绝方案不能执行、有限重规划后仍失败会停止并交人工。最后接Dashboard与云端指标，显示真实来源、空值及失败，不用动画补齐链路。
+
+本清单是后续工程建议与交接要求，不声称这些云端阶段已完成。

@@ -1,69 +1,124 @@
-# B 线接口协议 v0.1（待集成负责人冻结）
+# B 线数据协议 v0.1
 
-依据实施计划 §1.3、§2、§8.2。此文件先于字段修改更新；它是本次实现的协议草案，不声称 A/C 已同意。
+[文档首页](README.md) · [API 示例](api.md) · [执行语义](architecture.md)
 
-## 单位与方向
+本文件解释当前 `power_engine/contracts.py`，是 B 线接口草案，不代表 A/C 和集成负责人已经冻结全部云端协议。模型变更先修改本文件、再改 Schema/调用方/测试。
 
-- 功率 kW，容量 kWh，时长秒，SOC 0–1，电压 p.u.，频率 Hz。
-- `battery_power_kw > 0` 为放电，负数为充电；进入 pandapower storage 时反号并除以 1000。
-- `grid_power_kw > 0` 为从主网进口，负数为出口。
-- `timestamp` 必须带时区；模拟时间与真实代码运行耗时分开。
-- JSON 拒绝 NaN/Infinity、未知字段、负需求和不合法时长。普通 Python 类型转换采用 Pydantic 默认行为；不是 strict-mode 类型系统。
-- 当前与预测 SOC 的运行边界统一采用 `SOC_TOL = 1e-10`（SOC 0–1 单位），由电池模块定义，优化器、固定规则和 Validator 共用。只容忍浮点误差，不扩大充放电能量额度、不裁剪或重写 SOC；超过容差仍拒绝。Schema 的绝对 `[0, 1]` 范围保持不变。
+## 单位、类型、时间和信任边界
 
-## 模型与职责
+功率 kW，电池容量 kWh，时长秒，SOC 0–1，电压 p.u.，频率 Hz。储能功率正值为放电，负值为充电；PCC 功率正值为进口，负值为出口。不要在 JSON 中混入 MW 或百分数 SOC。
 
-`MicrogridState`：当前观测。包含计划规定的核心字段，以及可用 PV、实际 PV、关键/普通负荷需求与供电、可削减上限、储能降额功率、PCC 进口/出口上限。`normal_shed_max_kw <= load_normal_kw`。未做潮流/刚注入事故时电压和 PCC 功率为 null，不能把 null 画成“正常”。`run_id` 每次 reset 改变；`state_revision` 在事故和执行时增加。
+所有 WireModel 默认拒绝未知字段和 NaN/Infinity，实例 frozen。其余普通字段仍采用 Pydantic 默认类型转换，**并非整个模型 strict-mode**。
 
-`DispatchPlan`：request_id、plan_id、完整状态 SHA-256 指纹、duration_seconds (0,300]、PV 实际设定、储能功率、普通削负荷、关键削负荷（只能为零），及可选 expected_grid_kw。后者是优化估计，不是主网功率命令；Validator 完全不依赖该估计。
+`Duration` 严格接收数值，范围 `(0,300]`，拒绝布尔值、字符串、数组、非有限数。`Identifier` 用于 request_id/plan_id：严格字符串，1–128 字符，至少包含一个非空白字符；不会自动去除首尾空白。不要依赖字符串化任意对象。
 
-`ValidationResult`：序列化键为 **pass**，Python 属性为 `passed`。包含输入状态、方案、配置指纹；predicted_soc；AC 结果；带 code/message/actual/limit 的 violated_rules。硬规则失败时不调用潮流。未收敛、非有限结果、缺依赖都拒绝。
+`timestamp` 必须带时区，是模拟时钟，不是事件接收的墙钟时间。state 默认模拟起点固定；run_id 是 reset 隔离标识；revision 是状态变化序号。
 
-`ExecutionReceipt`：accepted / applied / cancelled。收到事故会取消已接受但未执行的方案。相同 plan_id+内容重复调用返回原回执；同 ID 不同内容拒绝。reset 后旧方案因 run_id 不同不能重放。
+`.wire()` 输出可 JSON 序列化的字典，启用 alias。`checked` 在公共输入边界重新验证已有模型，避免 `model_copy(update=...)` 绕过类型约束。`fingerprint` 对 wire 字典按键排序、紧凑 JSON 编码后计算 SHA-256；不是签名或权限凭证。
 
-`OptimizationResult`：optimal / feasible / infeasible / error。优化器的 optimal 仅指当前简化 LP；固定规则返回 feasible，不声称最优。无解返回 plan=null。AC 是否安全由 Validator 独立判定。
+当前和预测 SOC 的运行范围共用 1e-10 容差；原始 SOC 不裁剪、不四舍五入。Schema 的绝对 [0,1] 范围仍然生效。
 
-运行 `python -m simulator schemas` 获取字段级 JSON Schema。算法可接受对应 Pydantic 对象或字典，对外只传 JSON，不传 pandapowerNet。
+## 导出的七类顶层 Schema
 
-## 时间与执行语义
+```bash
+python -m simulator schemas --output outputs/schemas
+```
 
-`apply_action(plan)` 在**最新状态**独立复验，保存不可变方案与校验结果，仅返回 accepted，不推进时间。
-`step()` 使用方案指定的整个 duration_seconds（默认 5 秒），原子更新功率/SOC/时间并返回 applied。显式传入不同 dt 拒绝。步骤前再次确认状态和配置指纹相同，因此不会换状态后沿用旧批准。
-没有 pending 方案时 step 返回 NO_PENDING_ACTION，不伪装系统依然稳定运行。调用者需要每周期读取状态、重规划、校验与提交；真实实时调度器和故障保护不是本版本的功能。
+导出 `MicrogridConfig`、`MicrogridState`、`DispatchPlan`、`PowerFlowResult`、`OptimizationResult`、`ValidationResult`、`ExecutionReceipt`。`BatteryConfig`、`NetworkConfig`、`RuleViolation` 是嵌套定义。字段约束以本提交生成的 Schema 为准，不能混用旧 CI 的导出。
 
-哈希是内容绑定，不是签名/权限验证。当前 idempotency 记录仅在单个进程内；公开服务接入前由 A/C 增加认证、持久化、跨进程串行化和设备授权。不可将“用户传入的 config/state”当成可信设备状态。
+### MicrogridConfig
 
-## 算法和 JSON 入口
+可信部署配置，包含 battery、network、步长、初始出力/负荷、PCC 上限、额定频率和目标权重。完整字段和默认值见[模型表格](model.md)。它不是 `invoke` 的远端 payload 字段；配置由服务端调用参数传入。
 
-- `run_power_flow(state, plan, config=None)` → PowerFlowResult
-- `optimize_dispatch(state, config=None, duration_seconds=None, feedback=None)` → OptimizationResult
-- `validate_plan(state, plan, config=None)` → ValidationResult
-- `fixed_rule_dispatch(...)` → OptimizationResult（相同规划输入）
-- `invoke(tool, payload, config=None)` → `{ok, request_id, result}` 或 `{ok:false, request_id, error_code, message}`
+### MicrogridState
 
-`invoke` 接收已解码的 JSON，顶层必须是对象。`null`、数组、字符串、数值或布尔值均返回结构化 `INVALID_INPUT`，并生成兜底 request_id，不调用算法；有效对象仍按原约定透传 request_id。JSON 文本解码由上层 MCP/HTTP 负责。
+| 字段或字段组 | 语义 |
+|---|---|
+| `schema_version` | 固定 `"0.1"` |
+| `microgrid_id`、`run_id` | 微电网标识、一次 reset 周期标识 |
+| `state_revision`、`timestamp` | 非负序号、带时区模拟时间 |
+| `scenario_id` | `normal/A/B/C` |
+| `pv_available_kw`、`pv_power_kw` | 可用/实际 PV，非负；实际不超过可用 |
+| `load_critical_kw`、`load_normal_kw` | 两类负荷需求，非负 |
+| `critical_served_kw`、`normal_served_kw` | 实际供电功率，非负且不超过需求 |
+| `normal_shed_max_kw` | 普通负荷允许削减上限，不超过普通需求 |
+| `battery_soc`、`battery_power_kw` | SOC 与储能当前有功 |
+| `battery_charge_max_kw`、`battery_discharge_max_kw` | 当前设备能力；还需与 config 铭牌及能量边界取交集 |
+| `grid_import_max_kw`、`grid_export_max_kw` | 当前 PCC 双向能力 |
+| `grid_available`、`grid_voltage_pu` | 主网是否可用、上级给定电压 |
+| `frequency_hz` | 额定/场景输入，不是动态仿真结果 |
+| `alarm_code` | null 或告警，例如 `ESS_DERATED` |
+| `pcc_voltage_pu`、`grid_power_kw` | AC 结果；初始/刚触发事故时 null |
 
-config 是部署方的可信配置，不在 invoke 的远端 payload 中开放。`ok=true` 不等于通过安全校验。request_id 在优化接口传入时贯穿生成的 plan 及后续验证/执行；调用其他工具时应复用 plan.request_id。
+初始的负荷供电字段是初值，不是已经通过潮流证明的运行证据。展示安全状态时应核验实际 `applied` 回执及其 validation，而不是仅查看 served 字段。
 
-## 错误码
+### DispatchPlan
 
-硬规则：STALE_STATE、CURRENT_SOC_LIMIT、SOC_MIN、SOC_MAX、ESS_DISCHARGE_LIMIT、ESS_CHARGE_LIMIT、CRITICAL_LOAD_SHED、NORMAL_SHED_LIMIT、PV_AVAILABILITY。
-AC：GRID_IMPORT_LIMIT、GRID_EXPORT_LIMIT、VOLTAGE_LOW、VOLTAGE_HIGH、LINE_OVERLOAD、POWER_BALANCE、POWER_FLOW_FAILED、DEPENDENCY_UNAVAILABLE、UNSUPPORTED_ISLAND_MODE。
-规划/执行：NO_FEASIBLE_DISPATCH、OPTIMIZER_FAILED、STALE_FEEDBACK、UNSAFE_PLAN、ACTION_PENDING、NO_PENDING_ACTION、DURATION_MISMATCH、STALE_CONFIG、IDEMPOTENCY_CONFLICT。
-适配器：INVALID_INPUT、UNKNOWN_TOOL。时间区间结束后仍需要设备级保护，此协议不作生产安全保证。
+| 字段 | 要求与含义 |
+|---|---|
+| `schema_version` | `"0.1"` |
+| `request_id`、`plan_id` | Identifier；省略则自动生成 UUID 字符串 |
+| `state_fingerprint` | 64 字符，必须匹配完整当前状态的 fingerprint |
+| `duration_seconds` | 默认 5；Duration；执行必须使用相同时长 |
+| `pv_power_kw` | PV 实际设定值，非负 |
+| `battery_power_kw` | 正放电、负充电 |
+| `normal_shed_kw` | 非负，默认 0；Validator 检查可削范围 |
+| `critical_shed_kw` | 非负，默认 0；Schema 可表达坏方案，但 Validator 拒绝一切非零值 |
+| `expected_grid_kw` | 可选 LP 估计；不是可下发的主网功率命令，Validator 不依赖它 |
 
-## 尚未由 B 线定义的集成对象
+修改 plan 任意内容后必须重新验证；重规划产生新 plan_id。不要复用旧批准或篡改指纹来绕过过期检查。
 
-TelemetryEvent 外层设备封包、GridEvent、AgentFinding、IoTDA 命令回执映射，需要 A/C 与集成负责人按实施计划共同冻结。本仓库没有伪造这些云端实现。
+### PowerFlowResult / OptimizationResult
 
-## 第二轮审查补充（2026-10-14，仍为待冻结草案）
+`PowerFlowResult` 有 converged、error_code、message，以及 PCC/极值电压、线路负载、PCC 功率、损耗和功率平衡残差。converged=true 要求全部电气字段存在且有限、没有 error_code，PCC 电压处于报告的极值范围内。converged=false 不代表“零电压正常”，应读取错误。
 
-- `duration_seconds` / `step_seconds` 必须是 JSON 数值，拒绝布尔值、字符串、容器和非有限数；范围仍为 `(0,300]`。规划接口的 `duration_seconds=null` 或省略使用配置默认值。
-- `request_id` 和 `plan_id` 为 1–128 字符且不能全为空白的字符串，拒绝把对象/数值强制转成 ID。未传顶层 request_id 时，优化调用生成 UUID，验证/潮流调用继承 plan.request_id；显式传入冲突 ID 返回 INVALID_INPUT。格式不合法时错误响应使用新生成的兜底 UUID。
-- `PowerFlowResult.converged=true` 必须同时包含全部电气量，且 min_voltage <= pcc_voltage <= max_voltage，不能带 error_code。Validator 对缺字段/非法潮流结果返回 INVALID_POWER_FLOW_RESULT，不把空结果视为通过。
-- 执行回执新增可选 `validation` 字段；Simulator 产生的回执包含 apply_action **实际复验**的完整结果，供执行后审计使用，而不是用第一次候选验证替代实际执行证据。
-- Simulator 的公开状态/配置/命令操作用实例级 RLock 串行化。`get_receipt(plan_id)` 查询当前进程内回执；`cancel_pending_action()` 取消未执行命令并返回 cancelled，无 pending 时返回 null。配置修改后仍须重新规划，可用取消接口解除旧 pending。锁不提供多进程、分布式或真实设备并发保证；control_step 的多步调用不是整个云端事务。
-- JSONL 新增 `execution_audit`（实际执行状态与实际复验结果的对照）和 `operational_error`。summary/CSV 新增 failure_kind、执行越界率、实际观测时间与能量统计。执行越界数按“有任一越界的已执行区间数”计数，不按每条错误重复计数；分母为 completed_intervals，无执行时越界率为 null。
-- 审计覆盖 SOC/能量变化、储能功率、PCC 进出口、母线电压、线路负载、功率平衡、PV、普通/关键负荷及方案/状态/配置绑定。缺少实际复验证据不会当作安全。
-- 不完整 episode 的完整周期保障率/新能源利用率仍为 null；新增能量字段只记录已实际推进的区间，不外推失败后的供电。local_control_latency_ms 仍只是本地函数耗时，不是云端事件到执行耗时。
-- batch 保留合理的无解/约束拒绝样本（退出码 0），但缺依赖、求解器故障、执行异常或执行审计失败时退出码 2，并保留日志与汇总。不会把“程序故障”统计成正常的不可行样本。
+`OptimizationResult.status` 为 `optimal/feasible/infeasible/error`。优化器的 optimal 只指 LP，固定规则的 feasible 也只是候选。`plan` 可以为 null；必须先检查，才能进入 Validator。`objective` 是优化器单区间目标值，固定规则没有同口径 objective。
+
+### ValidationResult
+
+Python 属性叫 `passed`，wire/JSON 键为 **`pass`**。有 request_id、plan_id、state_fingerprint、plan_fingerprint、config_fingerprint、predicted_soc、power_flow 和 violated_rules。
+
+每条 RuleViolation 是 `{code, message, actual, limit}`；actual/limit 允许 null。硬规则失败时 power_flow 为 null，不浪费潮流计算；拒绝反馈不得跨状态或配置复用。
+
+### ExecutionReceipt
+
+字段：request_id、plan_id、status、timestamp、state_revision、plan_fingerprint、validation。
+
+status 仅为 accepted/applied/cancelled。validation 保存 **apply_action 在最新状态执行的复验**，不是调用方提交的批准；applied 沿用该证据。兼容 Schema 允许 validation=null，但执行后审计会拒绝缺证据的回执。
+
+`apply_action` 只接收；`step` 才执行。状态/配置指纹改变、时长不符时拒绝执行。取消不推进时间；相同 ID/内容再次提交返回当前回执，不能把 cancelled 变成一条新的命令。reset 清空本实例回执。
+
+## JSON 适配器协议
+
+入口 `invoke(tool, payload, config=None)` 接收**已解码的对象**，不是 JSON 文本。null、数组等顶层值返回 INVALID_INPUT，并生成兜底 request_id。未知工具返回 UNKNOWN_TOOL。
+
+| tool | 允许的 payload 字段 |
+|---|---|
+| `optimize_dispatch` | 必需 state；可选 request_id、duration_seconds、feedback |
+| `run_power_flow` | 必需 state、plan；可选 request_id |
+| `validate_plan` | 必需 state、plan；可选 request_id |
+
+规划 payload 的 duration_seconds 省略或 null 使用配置步长；plan 自身的 duration_seconds 不能为 null。feedback 是之前的 ValidationResult，必须匹配同一个状态和配置。
+
+成功工具调用返回 `{ok:true, request_id, result}`；输入或已定义工具错误返回 `{ok:false, request_id, error_code, message}`。**外层 ok=true 不表示优化有解、潮流收敛、校验通过或命令已执行**，必须逐层检查。
+
+优化调用把外层 request_id 写入生成的 plan。验证/潮流未传 request_id 时继承 plan.request_id；显式传入不同 ID 则拒绝。存在有效 request_id 时错误也保留它；无法验证 ID 时返回生成的兜底 ID。
+
+没有 `invoke("fixed_rule_dispatch", ...)` 或 `invoke("execute_action", ...)`。固定规则和 Simulator 通过 Python 调用；远端执行应由后续独立服务封装。意外程序缺陷仍可能抛异常，上层应记录追踪与告警，不能伪造安全结果。
+
+## 错误与规则分层
+
+| 层 | 主要 code |
+|---|---|
+| 输入/适配器 | INVALID_INPUT、UNKNOWN_TOOL |
+| 当前状态/硬规则 | STALE_STATE、CURRENT_SOC_LIMIT、CRITICAL_LOAD_SHED、NORMAL_SHED_LIMIT、PV_AVAILABILITY、ESS_DISCHARGE_LIMIT、ESS_CHARGE_LIMIT、SOC_MIN、SOC_MAX |
+| AC | GRID_IMPORT_LIMIT、GRID_EXPORT_LIMIT、VOLTAGE_LOW、VOLTAGE_HIGH、LINE_OVERLOAD、POWER_BALANCE、POWER_FLOW_FAILED、INVALID_POWER_FLOW_RESULT、DEPENDENCY_UNAVAILABLE、INVALID_LOAD、UNSUPPORTED_ISLAND_MODE |
+| 规划 | NO_FEASIBLE_DISPATCH、OPTIMIZER_FAILED、STALE_FEEDBACK |
+| 接收/执行 | UNSAFE_PLAN、ACTION_PENDING、NO_PENDING_ACTION、DURATION_MISMATCH、STALE_CONFIG、IDEMPOTENCY_CONFLICT |
+| 控制/实验 | VALIDATION_REJECTED、INVALID_ENGINE_RESULT、EXECUTION_FAILED、EXECUTION_AUDIT_FAILED |
+
+执行后审计返回 `{passed, violated_rules}`，其中 violated_rules 是**字符串 code 列表**，不是 ValidationResult 中的对象列表。它还有 RECEIPT_BINDING、MISSING_EXECUTION_VALIDATION、EXECUTED_SOC_ENERGY 等证据审计规则。不要把两种形状混用；完整实现见 `simulator/metrics.py`，处理方式见[排错](troubleshooting.md)。
+
+## 尚未由 B 线冻结的对象
+
+原计划要求的 TelemetryEvent 设备封包、GridEvent、AgentFinding、IoTDA 回执映射和远端执行授权仍需 A/C 与集成负责人共同定义。本次导出七类本地 Schema 不等于已经完成全部云端协议。
