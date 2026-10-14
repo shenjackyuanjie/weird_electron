@@ -69,7 +69,25 @@ wheel 构建通过证明可打包，editable 安装通过证明开发安装链�
 |---|---|---|
 | `ca56654` | [#4](https://github.com/shenjackyuanjie/weird_electron/actions/runs/38501486371) | 旧依赖，Ubuntu3.11/Windows3.13，各194 passed，0跳过，语句覆盖95.08% |
 | `3ff361b` | [#5](https://github.com/shenjackyuanjie/weird_electron/actions/runs/38557194665) | 新依赖，四个环境各194 passed，0失败/错误/跳过，语句覆盖95.08%；两条SciPy批量复测结果一致 |
+| `130463f` | [#6](https://github.com/shenjackyuanjie/weird_electron/actions/runs/38559204791) | 新依赖与文档示例，四个环境各228 passed，0失败/错误/跳过，语句覆盖95.08% |
 
-上表是指定提交的记录，不是对任何未来 main 的承诺。文档示例测试加入后的总数会增加，以其提交对应的 JUnit/Actions 为准；不要沿用194作为永久常量。
+上表是指定提交的记录，不是对任何未来 main 的承诺；应查看对应提交的 JUnit/Actions，不把测试总数写成永久常量。
 
-性能和随机案例统计采用特定仿真条件，不能当真实系统 SLA 或全部物理状态的安全证明。原计划最后需要的 Agent/云端指标仍见[交接清单](handoff.md)。
+## 本次文档与依赖交付验证（2026-10-14）
+
+CI #6 对应完整提交 `130463fe37ab0d60731bfd52ffbefc1c62fc56cb`，状态 completed/success。已实际下载并核对四份JUnit、coverage和运行产物，结果如下：
+
+| 环境 | 通过 | 失败/错误/跳过 | 语句覆盖率 |
+|---|---:|---:|---:|
+| Ubuntu / Python3.11 | 228 | 0/0/0 | 95.08%（676/711） |
+| Ubuntu / Python3.12 | 228 | 0/0/0 | 95.08%（676/711） |
+| Ubuntu / Python3.13 | 228 | 0/0/0 | 95.08%（676/711） |
+| Windows / Python3.13 | 228 | 0/0/0 | 95.08%（676/711） |
+
+新增34项文档相关检查，包括两种策略运行完整local_loop和一次manual_dispatch手工JSON链的真实AC集成测试。每个环境还完成独立A/B/C六区间Demo、pip check、Ruff、七类Schema导出和wheel构建。
+
+Ubuntu3.11与3.13各完成40 seed×两策略实验：每条80个episode，78完成，2个seed=6事故A的供电不足案例明确返回NO_FEASIBLE_DISPATCH。每条314个已执行区间均保留实际receipt.validation且execution_audit.passed=true；operational_errors与executed_constraint_violations均为0。未完成样本的完整周期比率保持null，不编造停机后的能量。
+
+原始Artifacts：Ubuntu3.11为11891512742，Ubuntu3.12为11890743062，Ubuntu3.13为11891597684，Windows3.13为11891128122，均属于上述CI #6。第三方固定版本与仍受上游限制的包详见[依赖说明](dependencies.md)。
+
+本节是验证完成后的文档补记，不改变已测代码、依赖或测试。性能和随机案例统计采用特定仿真条件，不能当真实系统SLA或全部物理状态的安全证明。原计划最后需要的Agent/云端指标仍见[交接清单](handoff.md)。
