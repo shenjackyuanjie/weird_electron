@@ -3,6 +3,13 @@ import math
 
 from power_engine.contracts import BatteryConfig, MicrogridState
 
+SOC_TOL = 1e-10  # Shared numerical tolerance, not additional usable battery energy.
+
+
+def soc_within_limits(soc: float, cfg: BatteryConfig) -> bool:
+    """Accept only operating bounds plus roundoff; never clip or change the supplied SOC."""
+    return cfg.soc_min - SOC_TOL <= soc <= cfg.soc_max + SOC_TOL
+
 
 def project_soc(soc: float, power_kw: float, duration_seconds: float, cfg: BatteryConfig) -> float:
     if not all(math.isfinite(x) for x in (soc, power_kw, duration_seconds)):

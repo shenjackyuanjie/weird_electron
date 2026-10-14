@@ -9,9 +9,12 @@ from power_engine.power_flow import run_power_flow
 from power_engine.validator import validate_plan
 
 
-def invoke(tool: str, payload: dict, config: MicrogridConfig | None = None) -> dict:
-    request_id = str(payload.get("request_id") or uuid4())
+def invoke(tool: str, payload: object, config: MicrogridConfig | None = None) -> dict:
+    request_id = str(uuid4())
     try:
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be a JSON object")
+        request_id = str(payload.get("request_id") or request_id)
         allowed = {"state", "request_id", "duration_seconds", "feedback"} if tool == "optimize_dispatch" else {"state", "plan", "request_id"}
         if set(payload) - allowed:
             raise ValueError("Unknown top-level fields")

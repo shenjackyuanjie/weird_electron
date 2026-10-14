@@ -1,4 +1,5 @@
 """Fixed-order EMS baseline. This module never invokes an optimization solver."""
+from power_engine.battery import soc_within_limits
 from power_engine.contracts import (
     DispatchPlan, MicrogridConfig, MicrogridState, OptimizationResult, checked, fingerprint,
 )
@@ -12,7 +13,7 @@ def fixed_rule_dispatch(state, config: MicrogridConfig | None = None, *, duratio
     duration = cfg.step_seconds if duration_seconds is None else duration_seconds
     if not state.grid_available:
         return OptimizationResult(status="error", error_code="UNSUPPORTED_ISLAND_MODE")
-    if not cfg.battery.soc_min <= state.battery_soc <= cfg.battery.soc_max:
+    if not soc_within_limits(state.battery_soc, cfg.battery):
         return OptimizationResult(status="error", error_code="CURRENT_SOC_LIMIT")
     reserve, cap, charge_max, discharge_max = planning_inputs(state, cfg, duration, feedback)
     demand = state.load_critical_kw + state.load_normal_kw + reserve

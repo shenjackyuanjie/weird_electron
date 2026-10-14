@@ -9,6 +9,7 @@
 - `grid_power_kw > 0` 为从主网进口，负数为出口。
 - `timestamp` 必须带时区；模拟时间与真实代码运行耗时分开。
 - JSON 拒绝 NaN/Infinity、未知字段、负需求和不合法时长。普通 Python 类型转换采用 Pydantic 默认行为；不是 strict-mode 类型系统。
+- 当前与预测 SOC 的运行边界统一采用 `SOC_TOL = 1e-10`（SOC 0–1 单位），由电池模块定义，优化器、固定规则和 Validator 共用。只容忍浮点误差，不扩大充放电能量额度、不裁剪或重写 SOC；超过容差仍拒绝。Schema 的绝对 `[0, 1]` 范围保持不变。
 
 ## 模型与职责
 
@@ -39,6 +40,8 @@
 - `validate_plan(state, plan, config=None)` → ValidationResult
 - `fixed_rule_dispatch(...)` → OptimizationResult（相同规划输入）
 - `invoke(tool, payload, config=None)` → `{ok, request_id, result}` 或 `{ok:false, request_id, error_code, message}`
+
+`invoke` 接收已解码的 JSON，顶层必须是对象。`null`、数组、字符串、数值或布尔值均返回结构化 `INVALID_INPUT`，并生成兜底 request_id，不调用算法；有效对象仍按原约定透传 request_id。JSON 文本解码由上层 MCP/HTTP 负责。
 
 config 是部署方的可信配置，不在 invoke 的远端 payload 中开放。`ok=true` 不等于通过安全校验。request_id 在优化接口传入时贯穿生成的 plan 及后续验证/执行；调用其他工具时应复用 plan.request_id。
 

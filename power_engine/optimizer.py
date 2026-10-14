@@ -3,7 +3,7 @@ import math
 
 from scipy.optimize import linprog
 
-from power_engine.battery import power_limits
+from power_engine.battery import power_limits, soc_within_limits
 from power_engine.contracts import (
     DispatchPlan, EngineError, MicrogridConfig, MicrogridState,
     OptimizationResult, ValidationResult, checked, fingerprint,
@@ -38,7 +38,7 @@ def optimize_dispatch(state, config: MicrogridConfig | None = None, *, duration_
     duration = cfg.step_seconds if duration_seconds is None else duration_seconds
     if not state.grid_available:
         return OptimizationResult(status="error", error_code="UNSUPPORTED_ISLAND_MODE")
-    if not cfg.battery.soc_min <= state.battery_soc <= cfg.battery.soc_max:
+    if not soc_within_limits(state.battery_soc, cfg.battery):
         return OptimizationResult(status="error", error_code="CURRENT_SOC_LIMIT")
     reserve, grid_cap, charge, discharge = planning_inputs(state, cfg, duration, feedback)
     # Variables: import, export, charge, discharge, used PV, shed normal load (all kW).

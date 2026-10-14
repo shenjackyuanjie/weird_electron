@@ -1,5 +1,5 @@
 """Independent hard-rule + AC gate; never trusts optimizer's grid estimate."""
-from power_engine.battery import project_soc
+from power_engine.battery import SOC_TOL, project_soc, soc_within_limits
 from power_engine.contracts import (
     DispatchPlan, MicrogridConfig, MicrogridState, RuleViolation,
     ValidationResult, checked, fingerprint,
@@ -7,7 +7,6 @@ from power_engine.contracts import (
 from power_engine.power_flow import run_power_flow
 
 POWER_TOL_KW = 0.02  # Numerical tolerance, not an operating reserve.
-SOC_TOL = 1e-10
 
 
 def validate_plan(state, plan, config: MicrogridConfig | None = None) -> ValidationResult:
@@ -23,7 +22,7 @@ def validate_plan(state, plan, config: MicrogridConfig | None = None) -> Validat
         reject("STALE_STATE", "Plan does not refer to the exact current state")
     if not state.grid_available:
         reject("UNSUPPORTED_ISLAND_MODE", "Grid-forming/islanding is not modelled")
-    if not cfg.battery.soc_min - SOC_TOL <= state.battery_soc <= cfg.battery.soc_max + SOC_TOL:
+    if not soc_within_limits(state.battery_soc, cfg.battery):
         reject("CURRENT_SOC_LIMIT", "Current SOC is outside operating bounds", state.battery_soc)
     if plan.critical_shed_kw != 0:
         reject("CRITICAL_LOAD_SHED", "Critical load shedding is forbidden", plan.critical_shed_kw, 0)
