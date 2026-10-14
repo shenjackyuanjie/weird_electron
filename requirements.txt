@@ -1,0 +1,5 @@
+# Direct dependencies pinned; transitive versions are captured in each CI artifact.
+pandapower==3.4.0
+scipy==1.16.3
+pydantic==2.12.5
+numpy==2.3.5

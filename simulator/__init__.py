@@ -1,0 +1,1 @@
+"""Discrete, transactional microgrid simulation."""
