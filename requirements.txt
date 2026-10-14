@@ -1,5 +1,8 @@
-# Direct dependencies pinned; transitive versions are captured in each CI artifact.
-pandapower==3.4.0
-scipy==1.16.3
-pydantic==2.12.5
-numpy==2.3.5
+# Verified stable versions: 2026-10-14. See docs/dependencies.md.
+# pandapower 3.5.6 requires numpy<2.5; NumPy 2.4.6 supports Python 3.11+.
+pandapower==3.5.6
+numpy==2.4.6
+pydantic==2.14.1
+# SciPy 1.18 requires Python 3.12+. Keep the newest 3.11-compatible release.
+scipy==1.17.1; python_version < "3.12"
+scipy==1.18.1; python_version >= "3.12"

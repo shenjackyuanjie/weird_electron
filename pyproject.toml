@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,13 @@ version = "0.1.0"
 description = "GridGuardian phase-2 deterministic microgrid simulator and safety gate"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-dependencies = ["pandapower==3.4.0", "scipy==1.16.3", "pydantic==2.12.5", "numpy==2.3.5"]
+dependencies = [
+    "pandapower==3.5.6",
+    "numpy==2.4.6",
+    "pydantic==2.14.1",
+    "scipy==1.17.1; python_version < '3.12'",
+    "scipy==1.18.1; python_version >= '3.12'",
+]
 
 [project.scripts]
 gridguardian = "simulator.cli:main"
