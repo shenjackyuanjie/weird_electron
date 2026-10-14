@@ -7,12 +7,15 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 NonNegative = Annotated[float, Field(ge=0)]
 Positive = Annotated[float, Field(gt=0)]
 Fraction = Annotated[float, Field(ge=0, le=1)]
-Duration = Annotated[float, Field(gt=0, le=300)]
+Duration = Annotated[float, Field(gt=0, le=300, strict=True)]
+Identifier = Annotated[str, Field(strict=True, min_length=1, max_length=128, pattern=r"\S")]
+DURATION_ADAPTER = TypeAdapter(Duration)
+IDENTIFIER_ADAPTER = TypeAdapter(Identifier)
 
 
 class WireModel(BaseModel):
@@ -124,8 +127,8 @@ class MicrogridState(WireModel):
 
 class DispatchPlan(WireModel):
     schema_version: Literal["0.1"] = "0.1"
-    request_id: str = Field(default_factory=lambda: str(uuid4()))
-    plan_id: str = Field(default_factory=lambda: str(uuid4()))
+    request_id: Identifier = Field(default_factory=lambda: str(uuid4()))
+    plan_id: Identifier = Field(default_factory=lambda: str(uuid4()))
     state_fingerprint: str = Field(min_length=64, max_length=64)
     duration_seconds: Duration = 5
     pv_power_kw: NonNegative
@@ -148,6 +151,19 @@ class PowerFlowResult(WireModel):
     balance_residual_kw: float | None = None
 
 
+    @model_validator(mode="after")
+    def usable_converged_result(self):
+        if self.converged:
+            fields = (self.pcc_voltage_pu, self.min_voltage_pu, self.max_voltage_pu,
+                      self.line_loading_percent, self.grid_power_kw, self.loss_kw,
+                      self.balance_residual_kw)
+            if self.error_code is not None or any(value is None for value in fields):
+                raise ValueError("Converged power flow requires every electrical result and no error")
+            if not self.min_voltage_pu <= self.pcc_voltage_pu <= self.max_voltage_pu:
+                raise ValueError("PCC voltage must lie within the reported bus voltage range")
+        return self
+
+
 class RuleViolation(WireModel):
     code: str
     message: str
@@ -156,8 +172,8 @@ class RuleViolation(WireModel):
 
 
 class ValidationResult(WireModel):
-    request_id: str
-    plan_id: str
+    request_id: Identifier
+    plan_id: Identifier
     passed: bool = Field(alias="pass")
     state_fingerprint: str
     plan_fingerprint: str
@@ -176,12 +192,13 @@ class OptimizationResult(WireModel):
 
 
 class ExecutionReceipt(WireModel):
-    request_id: str
-    plan_id: str
+    request_id: Identifier
+    plan_id: Identifier
     status: Literal["accepted", "applied", "cancelled"]
     timestamp: AwareDatetime
     state_revision: int
     plan_fingerprint: str
+    validation: ValidationResult | None = None
 
 
 class EngineError(RuntimeError):

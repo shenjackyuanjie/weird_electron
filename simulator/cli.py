@@ -7,20 +7,27 @@ import time
 from pathlib import Path
 
 from power_engine.contracts import (
-    DispatchPlan, ExecutionReceipt, MicrogridConfig, MicrogridState, ValidationResult,
+    DispatchPlan, ExecutionReceipt, MicrogridConfig, MicrogridState, OptimizationResult,
+    PowerFlowResult, ValidationResult, checked,
 )
-from simulator.controller import control_step
+from simulator.controller import POLICIES, control_step
+from simulator.metrics import audit_execution
 from simulator.scenarios import SCENARIOS
 from simulator.simulator import MicrogridSimulator
 
 
 def run_episode(config, scenario_id, *, policy="optimizer", steps=6, severity=None):
-    if steps < 3:
+    if type(steps) is not int or steps < 3:
         raise ValueError("At least three intervals are required: normal, fault, recovery")
+    config = checked(MicrogridConfig, config)
+    if scenario_id not in SCENARIOS or policy not in POLICIES:
+        raise ValueError("Unknown scenario or policy")
     simulator = MicrogridSimulator(config)
     trace = []
     requested = delivered = pv_available = pv_used = 0.0
     rejected = violations = completed = 0
+    observed_seconds = 0.0
+    safety_failure = False
     for index in range(steps):
         if index == 1:
             simulator.trigger_scenario(scenario_id, severity)
@@ -40,18 +47,31 @@ def run_episode(config, scenario_id, *, policy="optimizer", steps=6, severity=No
         delivered += after["critical_served_kw"] * duration
         pv_available += before["pv_available_kw"] * duration
         pv_used += after["pv_power_kw"] * duration
-        # Check observed execution boundaries separately from the candidate gate count.
-        violations += int(not (
-            config.battery.soc_min - 1e-10 <= after["battery_soc"] <= config.battery.soc_max + 1e-10
-            and after["grid_power_kw"] <= before["grid_import_max_kw"] + 0.02
-            and after["grid_power_kw"] >= -before["grid_export_max_kw"] - 0.02
-            and after["critical_served_kw"] == before["load_critical_kw"]
-        ))
-    complete = completed == steps
+        observed_seconds += duration * 3600
+        audit = audit_execution(before, after, result["attempts"][-1]["plan"],
+                                result["receipt"], config)
+        result["execution_audit"] = audit
+        violations += int(not audit["passed"])
+        if not audit["passed"]:
+            safety_failure = True
+            break  # Preserve the actually executed interval and its failed audit.
+    complete = completed == steps and not safety_failure
+    operational_error = any(t.get("operational_error", False) for t in trace)
+    error_code = "EXECUTION_AUDIT_FAILED" if safety_failure else (
+        None if complete else trace[-1]["error_code"]
+    )
+    failure_kind = ("safety_violation" if safety_failure else "operational_error" if operational_error
+                    else "none" if complete else "infeasible" if error_code == "NO_FEASIBLE_DISPATCH"
+                    else "validation_rejected")
     summary = {
         "scenario_id": scenario_id, "policy": policy, "complete": complete,
         "requested_intervals": steps, "completed_intervals": completed,
-        "error_code": None if complete else trace[-1]["error_code"],
+        "error_code": error_code, "failure_kind": failure_kind,
+        "operational_error": operational_error,
+        "execution_constraint_violation_rate": violations / completed if completed else None,
+        "observed_duration_seconds": observed_seconds,
+        "critical_requested_kwh": requested, "critical_served_kwh": delivered,
+        "pv_available_kwh": pv_available, "pv_used_kwh": pv_used,
         "rejected_candidates": rejected, "executed_constraint_violations": violations,
         "critical_supply_ratio": delivered / requested if complete and requested else None,
         "pv_utilization_ratio": pv_used / pv_available if complete and pv_available else None,
@@ -64,13 +84,15 @@ def run_episode(config, scenario_id, *, policy="optimizer", steps=6, severity=No
 def write_episode(path, config, summary, trace):
     path.mkdir(parents=True, exist_ok=True)
     (path / "config.json").write_text(config.model_dump_json(indent=2), encoding="utf-8")
-    (path / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    (path / "trace.jsonl").write_text("".join(json.dumps(t, ensure_ascii=False) + "\n" for t in trace), encoding="utf-8")
+    (path / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    (path / "trace.jsonl").write_text("".join(json.dumps(t, ensure_ascii=False, allow_nan=False) + "\n" for t in trace), encoding="utf-8")
 
 
 def run_batch(output: Path, cases=40, steps=4):
-    if not 1 <= cases <= 10000:
+    if type(cases) is not int or not 1 <= cases <= 10000:
         raise ValueError("cases must be in [1, 10000]")
+    if type(steps) is not int or steps < 3:
+        raise ValueError("At least three intervals are required: normal, fault, recovery")
     output.mkdir(parents=True, exist_ok=True)
     rows = []
     for seed in range(cases):
@@ -91,9 +113,12 @@ def run_batch(output: Path, cases=40, steps=4):
         writer = csv.DictWriter(file, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
-    return {"episodes": len(rows), "complete": sum(r["complete"] for r in rows),
+    summary = {"episodes": len(rows), "complete": sum(r["complete"] for r in rows),
+            "operational_errors": sum(r["operational_error"] for r in rows),
             "incomplete": sum(not r["complete"] for r in rows),
             "executed_constraint_violations": sum(r["executed_constraint_violations"] for r in rows)}
+    (output / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False), encoding="utf-8")
+    return summary
 
 
 def main(argv=None):
@@ -117,13 +142,15 @@ def main(argv=None):
             cfg = MicrogridConfig.model_validate_json(args.config.read_text(encoding="utf-8")) if args.config else MicrogridConfig()
             summary, trace = run_episode(cfg, args.scenario, policy=args.policy, steps=args.steps)
             write_episode(args.output, cfg, summary, trace)
-            print(json.dumps(summary, ensure_ascii=False, indent=2))
+            print(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False))
             return 0 if summary["complete"] else 2
         if args.command == "batch":
-            print(json.dumps(run_batch(args.output, args.cases, args.steps), indent=2))
-            return 0  # Infeasible random cases are observations, not erased test failures.
+            summary = run_batch(args.output, args.cases, args.steps)
+            print(json.dumps(summary, indent=2, allow_nan=False))
+            return 2 if summary["operational_errors"] or summary["executed_constraint_violations"] else 0
         args.output.mkdir(parents=True, exist_ok=True)
-        for cls in (MicrogridConfig, MicrogridState, DispatchPlan, ValidationResult, ExecutionReceipt):
+        for cls in (MicrogridConfig, MicrogridState, DispatchPlan, PowerFlowResult,
+                    OptimizationResult, ValidationResult, ExecutionReceipt):
             (args.output / f"{cls.__name__}.json").write_text(json.dumps(cls.model_json_schema(), indent=2), encoding="utf-8")
         print(f"Schemas written to {args.output}")
         return 0

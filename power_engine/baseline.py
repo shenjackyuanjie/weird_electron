@@ -1,7 +1,7 @@
 """Fixed-order EMS baseline. This module never invokes an optimization solver."""
 from power_engine.battery import soc_within_limits
 from power_engine.contracts import (
-    DispatchPlan, MicrogridConfig, MicrogridState, OptimizationResult, checked, fingerprint,
+    DURATION_ADAPTER, DispatchPlan, MicrogridConfig, MicrogridState, OptimizationResult, checked, fingerprint,
 )
 from power_engine.optimizer import planning_inputs
 
@@ -10,7 +10,9 @@ def fixed_rule_dispatch(state, config: MicrogridConfig | None = None, *, duratio
                         feedback=None) -> OptimizationResult:
     state = checked(MicrogridState, state)
     cfg = checked(MicrogridConfig, config or MicrogridConfig())
-    duration = cfg.step_seconds if duration_seconds is None else duration_seconds
+    duration = DURATION_ADAPTER.validate_python(
+        cfg.step_seconds if duration_seconds is None else duration_seconds
+    )
     if not state.grid_available:
         return OptimizationResult(status="error", error_code="UNSUPPORTED_ISLAND_MODE")
     if not soc_within_limits(state.battery_soc, cfg.battery):

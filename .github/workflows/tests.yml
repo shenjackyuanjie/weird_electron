@@ -29,12 +29,15 @@ jobs:
       - name: Require real numerical dependencies
         run: python -c "import pandapower, scipy; print('pandapower', pandapower.__version__, 'scipy', scipy.__version__)"
       - run: ruff check .
-      - run: python -m pytest --cov=power_engine --cov=simulator --cov-report=term-missing --cov-report=xml --junitxml=outputs/junit.xml
-      - name: Three standard closed loops
-        run: |
-          python -m simulator demo --scenario A --output outputs/demo-A
-          python -m simulator demo --scenario B --output outputs/demo-B
-          python -m simulator demo --scenario C --output outputs/demo-C
+      - run: python -m pytest --require-ac --strict-markers --cov-fail-under=89 --cov=power_engine --cov=simulator --cov-report=term-missing --cov-report=xml --junitxml=outputs/junit.xml
+      - name: Closed loop A
+        run: python -m simulator demo --scenario A --output outputs/demo-A
+      - name: Closed loop B
+        run: python -m simulator demo --scenario B --output outputs/demo-B
+      - name: Closed loop C
+        run: python -m simulator demo --scenario C --output outputs/demo-C
+      - name: Export all wire schemas
+        run: python -m simulator schemas --output outputs/schemas
       - name: Paired-seed experiment
         if: matrix.os == 'ubuntu-latest'
         run: python -m simulator batch --cases 40 --steps 4 --output outputs/batch

@@ -31,7 +31,7 @@
 `step()` 使用方案指定的整个 duration_seconds（默认 5 秒），原子更新功率/SOC/时间并返回 applied。显式传入不同 dt 拒绝。步骤前再次确认状态和配置指纹相同，因此不会换状态后沿用旧批准。
 没有 pending 方案时 step 返回 NO_PENDING_ACTION，不伪装系统依然稳定运行。调用者需要每周期读取状态、重规划、校验与提交；真实实时调度器和故障保护不是本版本的功能。
 
-哈希是内容绑定，不是签名/权限验证。当前 idempotency 记录仅在单个进程内；公开服务接入前由 A/C 增加认证、持久化、串行化/锁和设备授权。不可将“用户传入的 config/state”当成可信设备状态。
+哈希是内容绑定，不是签名/权限验证。当前 idempotency 记录仅在单个进程内；公开服务接入前由 A/C 增加认证、持久化、跨进程串行化和设备授权。不可将“用户传入的 config/state”当成可信设备状态。
 
 ## 算法和 JSON 入口
 
@@ -55,3 +55,15 @@ AC：GRID_IMPORT_LIMIT、GRID_EXPORT_LIMIT、VOLTAGE_LOW、VOLTAGE_HIGH、LINE_O
 ## 尚未由 B 线定义的集成对象
 
 TelemetryEvent 外层设备封包、GridEvent、AgentFinding、IoTDA 命令回执映射，需要 A/C 与集成负责人按实施计划共同冻结。本仓库没有伪造这些云端实现。
+
+## 第二轮审查补充（2026-10-14，仍为待冻结草案）
+
+- `duration_seconds` / `step_seconds` 必须是 JSON 数值，拒绝布尔值、字符串、容器和非有限数；范围仍为 `(0,300]`。规划接口的 `duration_seconds=null` 或省略使用配置默认值。
+- `request_id` 和 `plan_id` 为 1–128 字符且不能全为空白的字符串，拒绝把对象/数值强制转成 ID。未传顶层 request_id 时，优化调用生成 UUID，验证/潮流调用继承 plan.request_id；显式传入冲突 ID 返回 INVALID_INPUT。格式不合法时错误响应使用新生成的兜底 UUID。
+- `PowerFlowResult.converged=true` 必须同时包含全部电气量，且 min_voltage <= pcc_voltage <= max_voltage，不能带 error_code。Validator 对缺字段/非法潮流结果返回 INVALID_POWER_FLOW_RESULT，不把空结果视为通过。
+- 执行回执新增可选 `validation` 字段；Simulator 产生的回执包含 apply_action **实际复验**的完整结果，供执行后审计使用，而不是用第一次候选验证替代实际执行证据。
+- Simulator 的公开状态/配置/命令操作用实例级 RLock 串行化。`get_receipt(plan_id)` 查询当前进程内回执；`cancel_pending_action()` 取消未执行命令并返回 cancelled，无 pending 时返回 null。配置修改后仍须重新规划，可用取消接口解除旧 pending。锁不提供多进程、分布式或真实设备并发保证；control_step 的多步调用不是整个云端事务。
+- JSONL 新增 `execution_audit`（实际执行状态与实际复验结果的对照）和 `operational_error`。summary/CSV 新增 failure_kind、执行越界率、实际观测时间与能量统计。执行越界数按“有任一越界的已执行区间数”计数，不按每条错误重复计数；分母为 completed_intervals，无执行时越界率为 null。
+- 审计覆盖 SOC/能量变化、储能功率、PCC 进出口、母线电压、线路负载、功率平衡、PV、普通/关键负荷及方案/状态/配置绑定。缺少实际复验证据不会当作安全。
+- 不完整 episode 的完整周期保障率/新能源利用率仍为 null；新增能量字段只记录已实际推进的区间，不外推失败后的供电。local_control_latency_ms 仍只是本地函数耗时，不是云端事件到执行耗时。
+- batch 保留合理的无解/约束拒绝样本（退出码 0），但缺依赖、求解器故障、执行异常或执行审计失败时退出码 2，并保留日志与汇总。不会把“程序故障”统计成正常的不可行样本。

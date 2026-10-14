@@ -92,3 +92,11 @@ print(verdict)
 
 先看 [接口协议](docs/contracts.md)、[模型与限制](docs/model.md)、[后续接入清单](docs/handoff.md)。改字段先改协议。
 CI 在 Linux/Python 3.11 与 Windows/Python 3.13 运行真实潮流测试，并上传测试结果、环境清单和 Demo/实验日志。
+
+## 第二轮加固
+
+当前版本增加了严格的时长/请求 ID 校验与贯穿工具调用的 request_id；Simulator 公开操作有实例级锁，并提供 `get_receipt(plan_id)`、`cancel_pending_action()`。`ExecutionReceipt.validation` 保存实际执行入口复验结果。
+
+实验会独立核对实际执行的 SOC、储能功率、PCC、电压、线路、功率平衡和负荷/PV，输出 `execution_audit` 及能量统计。没有执行的区间不计算供电能量；不完整实验的完整周期保障率保持 null。`batch` 的合理无解样本仍保留，但运行故障或审计失败会返回非零退出码，根目录 `summary.json` 给出总体结果。
+
+完整环境推荐运行 `python -m pytest --require-ac`：缺少真实 pandapower 或有任何跳过项都会失败；普通 `pytest` 仍支持在缺依赖的环境中只做明确标注的部分测试。三个 Demo 在 CI 中分别执行，任何一个失败都会使 job 失败。接口细节及改变原因见 [第二轮审查记录](docs/review-2026-10-14.md)。

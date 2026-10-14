@@ -5,12 +5,13 @@ from scipy.optimize import linprog
 
 from power_engine.battery import power_limits, soc_within_limits
 from power_engine.contracts import (
-    DispatchPlan, EngineError, MicrogridConfig, MicrogridState,
+    DURATION_ADAPTER, DispatchPlan, EngineError, MicrogridConfig, MicrogridState,
     OptimizationResult, ValidationResult, checked, fingerprint,
 )
 
 
 def planning_inputs(state, cfg, duration_seconds, feedback):
+    duration_seconds = DURATION_ADAPTER.validate_python(duration_seconds)
     if not math.isfinite(duration_seconds) or not 0 < duration_seconds <= 300:
         raise ValueError("duration_seconds must be finite and in (0, 300]")
     reserve = 0.0
@@ -35,7 +36,9 @@ def optimize_dispatch(state, config: MicrogridConfig | None = None, *, duration_
                       feedback=None) -> OptimizationResult:
     state = checked(MicrogridState, state)
     cfg = checked(MicrogridConfig, config or MicrogridConfig())
-    duration = cfg.step_seconds if duration_seconds is None else duration_seconds
+    duration = DURATION_ADAPTER.validate_python(
+        cfg.step_seconds if duration_seconds is None else duration_seconds
+    )
     if not state.grid_available:
         return OptimizationResult(status="error", error_code="UNSUPPORTED_ISLAND_MODE")
     if not soc_within_limits(state.battery_soc, cfg.battery):

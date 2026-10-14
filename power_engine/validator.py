@@ -1,7 +1,7 @@
 """Independent hard-rule + AC gate; never trusts optimizer's grid estimate."""
 from power_engine.battery import SOC_TOL, project_soc, soc_within_limits
 from power_engine.contracts import (
-    DispatchPlan, MicrogridConfig, MicrogridState, RuleViolation,
+    DispatchPlan, MicrogridConfig, MicrogridState, PowerFlowResult, RuleViolation,
     ValidationResult, checked, fingerprint,
 )
 from power_engine.power_flow import run_power_flow
@@ -44,7 +44,11 @@ def validate_plan(state, plan, config: MicrogridConfig | None = None) -> Validat
         reject("SOC_MAX", "Plan would charge above maximum SOC", soc, cfg.battery.soc_max)
     flow = None
     if not violations:
-        flow = run_power_flow(state, plan, cfg)
+        try:
+            flow = checked(PowerFlowResult, run_power_flow(state, plan, cfg))
+        except (ValueError, TypeError) as exc:
+            flow = PowerFlowResult(converged=False, error_code="INVALID_POWER_FLOW_RESULT",
+                                   message=f"Malformed solver result: {exc}")
         if not flow.converged:
             reject(flow.error_code or "POWER_FLOW_FAILED", flow.message or "No usable AC result")
         else:
