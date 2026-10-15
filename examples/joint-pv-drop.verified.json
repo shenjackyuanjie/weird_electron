@@ -1,0 +1,196 @@
+{
+  "metadata": {
+    "kind": "offline-contract-fixtures",
+    "runtime_base_commit": "494508a0335cdcabf5496c28cdf3db26d5c52db8",
+    "profile": "proposed-pv350to100-demand350-no-shed",
+    "synthetic_state_not_c_telemetry": true,
+    "not_execution_authorization": true,
+    "config_fingerprint": "87c71a26675b1e36a0a2f3834bddce434dbbdae04ba16b84d7cfa230d013258c",
+    "state_fingerprint": "1e9f4872e2ac432ca97088fbe7e89058de4b00583dd49b9e26fa305367052916",
+    "python": "3.12.15",
+    "dependencies": {
+      "pandapower": "3.5.6",
+      "scipy": "1.18.1",
+      "numpy": "2.4.6",
+      "pydantic": "2.14.1"
+    },
+    "generator_commit": "06ade92293645bb2e7794f3179c6597575210db7",
+    "ci_run_id": 38754584827,
+    "artifact_id": 11983440720
+  },
+  "config": {
+    "battery": {
+      "capacity_kwh": 500.0,
+      "soc_min": 0.1,
+      "soc_max": 0.9,
+      "initial_soc": 0.6,
+      "charge_efficiency": 0.95,
+      "discharge_efficiency": 0.95,
+      "charge_max_kw": 150.0,
+      "discharge_max_kw": 200.0
+    },
+    "network": {
+      "nominal_kv": 0.4,
+      "length_km": 0.08,
+      "r_ohm_per_km": 0.125,
+      "x_ohm_per_km": 0.08,
+      "max_current_ka": 0.6,
+      "load_power_factor": 0.98,
+      "voltage_min_pu": 0.95,
+      "voltage_max_pu": 1.05,
+      "loading_max_percent": 100.0
+    },
+    "step_seconds": 5.0,
+    "pv_available_kw": 350.0,
+    "load_critical_kw": 200.0,
+    "load_normal_kw": 150.0,
+    "grid_import_max_kw": 100.0,
+    "grid_export_max_kw": 0.0,
+    "grid_voltage_pu": 1.0,
+    "nominal_frequency_hz": 50.0,
+    "import_cost_per_kwh": 0.18,
+    "curtail_cost_per_kwh": 1.0,
+    "shed_cost_per_kwh": 1000.0,
+    "battery_cost_per_kwh": 0.22
+  },
+  "state": {
+    "schema_version": "0.1",
+    "microgrid_id": "gridhive-joint-demo",
+    "run_id": "joint-pv-drop-fixture",
+    "state_revision": 1,
+    "timestamp": "2026-10-15T00:00:00+09:00",
+    "scenario_id": "A",
+    "pv_available_kw": 100.0,
+    "pv_power_kw": 100.0,
+    "load_critical_kw": 200.0,
+    "load_normal_kw": 150.0,
+    "critical_served_kw": 200.0,
+    "normal_served_kw": 150.0,
+    "normal_shed_max_kw": 0.0,
+    "battery_soc": 0.6,
+    "battery_power_kw": 0.0,
+    "battery_charge_max_kw": 150.0,
+    "battery_discharge_max_kw": 200.0,
+    "grid_import_max_kw": 100.0,
+    "grid_export_max_kw": 0.0,
+    "grid_available": true,
+    "grid_voltage_pu": 1.0,
+    "frequency_hz": 50.0,
+    "alarm_code": null,
+    "pcc_voltage_pu": null,
+    "grid_power_kw": null
+  },
+  "cases": {
+    "initial": {
+      "plan": {
+        "schema_version": "0.1",
+        "request_id": "joint-pv-drop-001",
+        "plan_id": "4a1eefe7-f8bf-46d5-9bab-012e588676ac",
+        "state_fingerprint": "1e9f4872e2ac432ca97088fbe7e89058de4b00583dd49b9e26fa305367052916",
+        "duration_seconds": 5.0,
+        "pv_power_kw": 100.0,
+        "battery_power_kw": 150.0,
+        "normal_shed_kw": 0.0,
+        "critical_shed_kw": 0.0,
+        "expected_grid_kw": 100.0
+      },
+      "validation": {
+        "request_id": "joint-pv-drop-001",
+        "plan_id": "4a1eefe7-f8bf-46d5-9bab-012e588676ac",
+        "pass": false,
+        "state_fingerprint": "1e9f4872e2ac432ca97088fbe7e89058de4b00583dd49b9e26fa305367052916",
+        "plan_fingerprint": "9c136c8e48de4d4e65f6010623e96e424fea1141cbeed566be910fe86b209dba",
+        "config_fingerprint": "87c71a26675b1e36a0a2f3834bddce434dbbdae04ba16b84d7cfa230d013258c",
+        "violated_rules": [
+          {
+            "code": "GRID_IMPORT_LIMIT",
+            "message": "Actual upstream import exceeds PCC limit",
+            "actual": 100.95819505617776,
+            "limit": 100.0
+          }
+        ],
+        "predicted_soc": 0.599561403508772,
+        "power_flow": {
+          "converged": true,
+          "error_code": null,
+          "message": null,
+          "pcc_voltage_pu": 0.9908228603124772,
+          "min_voltage_pu": 0.9908228603124772,
+          "max_voltage_pu": 1.0,
+          "line_loading_percent": 29.786198895010102,
+          "grid_power_kw": 100.95819505617776,
+          "loss_kw": 0.9581950561821512,
+          "balance_residual_kw": -4.379496765238855e-12
+        }
+      }
+    },
+    "replan": {
+      "plan": {
+        "schema_version": "0.1",
+        "request_id": "joint-pv-drop-001",
+        "plan_id": "cff0838d-f865-4f32-9e4e-e3612abffd75",
+        "state_fingerprint": "1e9f4872e2ac432ca97088fbe7e89058de4b00583dd49b9e26fa305367052916",
+        "duration_seconds": 5.0,
+        "pv_power_kw": 100.0,
+        "battery_power_kw": 151.07401456180037,
+        "normal_shed_kw": 0.0,
+        "critical_shed_kw": 0.0,
+        "expected_grid_kw": 100.0
+      },
+      "validation": {
+        "request_id": "joint-pv-drop-001",
+        "plan_id": "cff0838d-f865-4f32-9e4e-e3612abffd75",
+        "pass": true,
+        "state_fingerprint": "1e9f4872e2ac432ca97088fbe7e89058de4b00583dd49b9e26fa305367052916",
+        "plan_fingerprint": "9ea50041b0b4edfe2d47911a19948214f37b4f4104e249c7196a2f908f935087",
+        "config_fingerprint": "87c71a26675b1e36a0a2f3834bddce434dbbdae04ba16b84d7cfa230d013258c",
+        "violated_rules": [],
+        "predicted_soc": 0.5995582631153163,
+        "power_flow": {
+          "converged": true,
+          "error_code": null,
+          "message": null,
+          "pcc_voltage_pu": 0.9908912160874248,
+          "min_voltage_pu": 0.9908912160874248,
+          "max_voltage_pu": 1.0,
+          "line_loading_percent": 29.571995434214642,
+          "grid_power_kw": 99.87044858527838,
+          "loss_kw": 0.9444631470781062,
+          "balance_residual_kw": 6.437073096776658e-13
+        }
+      }
+    },
+    "hard_reject": {
+      "plan": {
+        "schema_version": "0.1",
+        "request_id": "joint-pv-drop-001",
+        "plan_id": "joint-unsafe-ess-over-limit",
+        "state_fingerprint": "1e9f4872e2ac432ca97088fbe7e89058de4b00583dd49b9e26fa305367052916",
+        "duration_seconds": 5.0,
+        "pv_power_kw": 100.0,
+        "battery_power_kw": 201.0,
+        "normal_shed_kw": 0.0,
+        "critical_shed_kw": 0.0,
+        "expected_grid_kw": 100.0
+      },
+      "validation": {
+        "request_id": "joint-pv-drop-001",
+        "plan_id": "joint-unsafe-ess-over-limit",
+        "pass": false,
+        "state_fingerprint": "1e9f4872e2ac432ca97088fbe7e89058de4b00583dd49b9e26fa305367052916",
+        "plan_fingerprint": "10e56f2c21f3e057853962dc322d9faacfd89537f8989bf95d937f499a7c8ae0",
+        "config_fingerprint": "87c71a26675b1e36a0a2f3834bddce434dbbdae04ba16b84d7cfa230d013258c",
+        "violated_rules": [
+          {
+            "code": "ESS_DISCHARGE_LIMIT",
+            "message": "Discharge exceeds current/nameplate limit",
+            "actual": 201.0,
+            "limit": 200.0
+          }
+        ],
+        "predicted_soc": 0.5994122807017543,
+        "power_flow": null
+      }
+    }
+  }
+}
